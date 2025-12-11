@@ -1,0 +1,1 @@
+console.log("Frontend ready. Connect to /api/game/move to play");

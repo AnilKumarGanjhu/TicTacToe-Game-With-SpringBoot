@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Tic Tac Toe With AI</title>
+<style>
+body {
+	font-family: Arial;
+    background: linear-gradient(135deg, #0a0f24, #091533, #081a42);
+    color: #e1e5ff;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	margin: 0;
+	padding-top: 40px;
+}
+
+h1 {
+	color: #6ebeff;
+}
+
+#status {
+    color: #9bc9ff;
+}
+
+#board-container {
+    position: relative;
+}
+
+#board {
+	background: rgba(255, 255, 255, 0.08);
+    border: 2px solid #2f3b66;
+    color: #6ebeff;
+    transition: 0.2s;
+	display: grid;
+	grid-template-columns: repeat(3, 100px);
+	grid-template-rows: repeat(3, 100px);
+	gap: 5px;
+	margin-top: 20px;
+}
+
+.cell {
+	width: 100px;
+	height: 100px;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	font-size: 40px;
+	font-weight: bold;
+	cursor: pointer;
+	border-radius: 8px;
+	background: rgba(255, 255, 255, 0.08);
+    border: 2px solid #2f3b66;
+    transition: 0.2s;
+}
+
+.cell:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: #6ebeff;
+}
+
+.disabled {
+	pointer-events: none;
+	background: #333;
+}
+
+#restartBtn {
+	margin-top: 20px;
+	padding: 10px 20px;
+	font-size: 16px;
+	cursor: pointer;
+	background: #1c6cf3;
+	color: white;
+	border: none;
+	border-radius: 8px;
+	transition: 0.2s;
+}
+
+#restartBtn:hover {
+	background: #0f54c9;
+}
+
+#win-line {
+    position: absolute;
+    width: 0;
+    height: 6px;
+    background: #6ebeff;
+    border-radius: 4px;
+    top: 50%;
+    left: 50%;
+    transform-origin: center;
+    transform: translate(-50%, -50%);
+    transition: width 0.4s ease, transform 0.4s ease;
+    box-shadow: 0 0 10px #6ebeff;
+    display: none;
+}
+</style>
+</head>
+<body>
+
+<h1>Tic Tac Toe With AI</h1>
+<div id="status">Your turn!</div>
+
+<div id="board-container">
+    <div id="win-line"></div>
+    <div id="board"></div>
+</div>
+
+<button id="restartBtn" onclick="restartGame()">Restart Game</button>
+
+<script>
+let board = [" "," "," "," "," "," "," "," "," "];
+let thinkingInterval = null;
+
+const boardDiv = document.getElementById("board");
+const statusDiv = document.getElementById("status");
+
+// ------- SOUND -------
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+function playTone(freq, dur=0.1, type="square"){
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + dur);
+}
+function playClickSound(){ playTone(800,0.05,"square"); }
+function playAiSound(){ playTone(400,0.15,"sine"); }
+function playWinSound(){ playTone(1000,0.4,"triangle"); }
+
+// ------- BOARD UI -------
+function initBoard(){
+    boardDiv.innerHTML = "";
+    for(let i=0;i<9;i++){
+        const cell = document.createElement("div");
+        cell.className = "cell";
+        cell.onclick = () => playerMove(i);
+        boardDiv.appendChild(cell);
+    }
+}
+initBoard();
+
+function updateBoardUI(arr = board){
+    document.querySelectorAll(".cell").forEach((cell, idx) => {
+        cell.innerText = arr[idx] === " " ? "" : arr[idx];
+    });
+}
+
+function disableBoard(){
+    document.querySelectorAll(".cell").forEach(c => c.classList.add("disabled"));
+}
+
+function enableBoard(){
+    document.querySelectorAll(".cell").forEach(c => c.classList.remove("disabled"));
+}
+
+// ------- DRAW WIN LINE -------
+function drawWinLine(type, index) {
+    const line = document.getElementById("win-line");
+    line.style.display = "block";
+
+    if (type === "row") {
+        line.style.width = "300px";
+        line.style.transform = `translate(-50%, -50%) translateY(${index * 105 - 105}px)`;
+    }
+    else if (type === "col") {
+        line.style.width = "300px";
+        line.style.transform = `translate(-50%, -50%) rotate(90deg) translateY(${index * 105 - 105}px)`;
+    }
+    else if (type === "diag") {
+        line.style.width = "420px";
+        line.style.transform = "translate(-50%, -50%) rotate(45deg)";
+    }
+    else if (type === "anti") {
+        line.style.width = "420px";
+        line.style.transform = "translate(-50%, -50%) rotate(-45deg)";
+    }
+}
+
+// ------- PLAYER MOVE -------
+async function playerMove(i){
+    if (board[i] !== " ") return;
+
+    playClickSound();
+
+    board[i] = "X";
+    updateBoardUI();
+    disableBoard();
+
+    const res = await fetch("http://localhost:8080/api/game/move", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ player: "X", position: i })
+    });
+    const data = await res.json();
+
+    if (data.status.startsWith("win")) {
+        board = data.board.slice();
+        updateBoardUI();
+        const parts = data.status.split("|");
+        drawWinLine(parts[2], parseInt(parts[3]));
+        statusDiv.innerText = parts[1] + " wins!";
+        playWinSound();
+        return;
+    }
+
+    if (data.status === "draw") {
+        board = data.board.slice();
+        updateBoardUI();
+        statusDiv.innerText = "Draw!";
+        return;
+    }
+
+    // AI THINKING
+    let dots = 0;
+    statusDiv.innerText = "AI is thinking";
+
+    thinkingInterval = setInterval(() => {
+        dots = (dots + 1) % 4;
+        statusDiv.innerText = "AI is thinking" + ".".repeat(dots);
+    }, 300);
+
+    // AI MOVE
+    setTimeout(() => {
+        clearInterval(thinkingInterval);
+        thinkingInterval = null;
+
+        board = data.board.slice();
+        updateBoardUI();
+        playAiSound();
+
+        if (data.status.startsWith("aiwin")) {
+            const parts = data.status.split("|");
+            drawWinLine(parts[2], parseInt(parts[3]));
+            statusDiv.innerText = "AI wins!";
+            playWinSound();
+            disableBoard();
+            return;
+        }
+
+        statusDiv.innerText = "Your turn!";
+        enableBoard();
+
+    }, 800);
+}
+
+// ------- RESTART -------
+async function restartGame(){
+    document.getElementById("win-line").style.display = "none";
+
+    if (thinkingInterval) {
+        clearInterval(thinkingInterval);
+        thinkingInterval = null;
+    }
+
+    statusDiv.innerText = "Restarting...";
+    disableBoard();
+
+    const res = await fetch("http://localhost:8080/api/game/start");
+    const data = await res.json();
+
+    board = data.board.slice();
+    updateBoardUI();
+
+    enableBoard();
+    statusDiv.innerText = "Your turn!";
+}
+</script>
+</body>
+</html>
